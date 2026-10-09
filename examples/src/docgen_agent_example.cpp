@@ -30,8 +30,8 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  const auto skill_dir = std::filesystem::absolute(
-    env_or("DOCGEN_SKILL_DIR", docgen::default_skill_dir));
+  const auto skill_dir = docgen::skill_dir_for(
+    std::filesystem::absolute(argv[0]).parent_path());
 
   if (std::string_view(argv[1]) == "--check") {
     const auto result = docgen::check(skill_dir);

@@ -24,8 +24,7 @@
 
 namespace docgen {
 
-inline constexpr const char* default_skill_dir =
-  "/Users/che/Documents/GitHub/DocTwin/skills/cpp-code-to-docs";
+inline constexpr const char* default_skill_dir = "skills/cpp-code-to-docs";
 inline constexpr const char* default_base_url = "https://opencode.ai/zen/go/v1";
 inline constexpr const char* default_model = "deepseek-v4.1-flash";
 
@@ -55,6 +54,30 @@ struct run_result {
   std::string error;
   std::filesystem::path out_dir;
 };
+
+// 定位 skill 目录：DOCGEN_SKILL_DIR 优先，否则从 exe 目录逐层向上找，
+// 同时覆盖两种布局：打包后 <exe>/skills/…、源码树里 <repo>/skills/…。
+[[nodiscard]] inline std::filesystem::path skill_dir_for(
+  const std::filesystem::path& exe_dir) {
+  if (const char* override_dir = std::getenv("DOCGEN_SKILL_DIR");
+      override_dir && *override_dir) {
+    return std::filesystem::absolute(override_dir);
+  }
+  auto base = std::filesystem::absolute(exe_dir);
+  for (int depth = 0; depth < 4; ++depth) {
+    std::error_code error;
+    const auto candidate = base / default_skill_dir;
+    if (std::filesystem::is_directory(candidate, error)) {
+      return candidate;
+    }
+    const auto parent = base.parent_path();
+    if (parent == base) {
+      break;
+    }
+    base = parent;
+  }
+  return std::filesystem::absolute(exe_dir) / default_skill_dir;
+}
 
 namespace detail {
 
