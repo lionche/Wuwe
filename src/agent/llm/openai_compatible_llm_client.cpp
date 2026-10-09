@@ -17,6 +17,7 @@
 #include <initializer_list>
 #include <map>
 #include <optional>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -27,6 +28,17 @@
 WUWE_NAMESPACE_BEGIN
 
 namespace {
+
+// OpenCode Go 的路由要求每个会话一个稳定 ID（32 位十六进制）。
+std::string make_opencode_session_id() {
+  static constexpr char digits[] = "0123456789abcdef";
+  std::random_device device;
+  std::string id(32, '0');
+  for (auto& ch : id) {
+    ch = digits[device() % 16];
+  }
+  return id;
+}
 
 json parse_json_object_or_default(const std::string& text, const json& fallback) {
   const auto parsed = json::parse(text, nullptr, false);
@@ -452,7 +464,8 @@ bool is_explicit_tool_choice_unsupported(const llm_response& response) {
 } // namespace
 
 openai_compatible_llm_client::openai_compatible_llm_client(llm_client_config config)
-    : config_(normalize_config(std::move(config))), http_(std::make_shared<default_http_client>()) {
+    : config_(normalize_config(std::move(config))), http_(std::make_shared<default_http_client>()),
+      opencode_session_id_(make_opencode_session_id()) {
 }
 
 openai_compatible_llm_client::openai_compatible_llm_client(
@@ -464,7 +477,7 @@ openai_compatible_llm_client::openai_compatible_llm_client(
 openai_compatible_llm_client::openai_compatible_llm_client(llm_client_config config,
   std::shared_ptr<http_client> http, openai_compatibility_policy policy)
     : config_(normalize_config(std::move(config))), http_(std::move(http)),
-      compatibility_policy_(policy) {
+      compatibility_policy_(policy), opencode_session_id_(make_opencode_session_id()) {
   if (!http_) {
     http_ = std::make_shared<default_http_client>();
   }
@@ -1142,6 +1155,9 @@ openai_compatible_llm_client::build_headers() const {
     if (config_.app_title.has_value() && !config_.app_title->empty()) {
       headers.push_back({ "X-Title", *config_.app_title });
     }
+  }
+  if (config_.base_url.find("opencode.ai") != std::string::npos) {
+    headers.push_back({ "x-opencode-session", opencode_session_id_ });
   }
   return headers;
 }

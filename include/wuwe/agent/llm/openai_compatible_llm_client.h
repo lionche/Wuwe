@@ -76,6 +76,8 @@ protected:
   std::shared_ptr<http_client> http_;
   openai_compatibility_policy compatibility_policy_;
   mutable std::atomic<bool> explicit_tool_choice_unsupported_ { false };
+  // OpenCode Go 要求每个会话带稳定 ID；一个 client 实例 = 一次 run
+  std::string opencode_session_id_ { "" };
 };
 
 WUWE_NAMESPACE_END

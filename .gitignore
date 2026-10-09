@@ -58,3 +58,8 @@ website/.npm-cache/
 .codex/
 .policy/
 .vscode/
+
+# Local editor / tooling noise
+.DS_Store
+.cache/
+compile_commands.json
