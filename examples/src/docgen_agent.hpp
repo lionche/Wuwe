@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <locale>
 #include <memory>
 #include <stop_token>
 #include <string>
@@ -25,8 +26,7 @@
 namespace docgen {
 
 inline constexpr const char* default_skill_dir = "skills/cpp-code-to-docs";
-inline constexpr const char* default_base_url = "https://opencode.ai/zen/go/v1";
-inline constexpr const char* default_model = "deepseek-v4.1-flash";
+// 端点、模型、key 都必须由调用方给出，不设厂商默认值。
 
 struct llm_endpoint {
   std::string base_url;
@@ -119,6 +119,18 @@ struct agent_parts {
 
 inline std::string prepare(const std::filesystem::path& skill_dir,
   const std::filesystem::path& workdir, agent_parts& out) {
+#ifdef _WIN32
+  // MSVC 的 std::filesystem::path 在窄/宽字符串之间转换时走全局 locale 的 codecvt，
+  // 默认是 ANSI 代码页。中文 Windows 上这会让文件名变成 GBK 字节，送进 nlohmann
+  // 就抛 type_error.316，表现为 list_directory 之类碰到中文文件名就失败。
+  // 全流程的路径约定是 UTF-8，所以启动时把全局 locale 切到 UTF-8。
+  // Win7 没有 ".UTF-8" 这个 locale，失败就维持原样（中文路径仍不可用）。
+  try {
+    std::locale::global(std::locale(".UTF-8"));
+  }
+  catch (const std::exception&) {
+  }
+#endif
   skills::directory_skill_loader loader({
     .root = skill_dir.parent_path(),
     .trust = wuwe::agent::core::content_trust_level::application_trusted,
@@ -163,6 +175,9 @@ inline std::string prepare(const std::filesystem::path& skill_dir,
   const auto project_root = skill_dir.parent_path().parent_path();
   std::vector<std::filesystem::path> candidates;
 #ifdef _WIN32
+  // 捆绑运行时是 Python 3.8（Win7 上限），但 skill 的 check_content.py 用了
+  // 3.9+ 的 Path.is_relative_to，所以本地 venv 优先，与 macOS 分支保持一致。
+  candidates.push_back(project_root / ".venv" / "Scripts" / "python.exe");
   candidates.push_back(project_root / "runtime" / "python" / "python.exe");
   candidates.emplace_back("python");
 #else
@@ -206,6 +221,9 @@ inline std::string prepare(const std::filesystem::path& skill_dir,
         .default_workdir = workdir,
         .allowed_executables = executables,
         .executable_search_paths = search_paths,
+        // skill 目录是只读的（skill.json 带 sha256 摘要），但 Python 默认会在
+        // scripts/ 下写 __pycache__，下一次 skill 加载就会报 undeclared_resource。
+        .base_environment = { { "PYTHONDONTWRITEBYTECODE", "1" } },
         .allow_shell = true,
         .require_approval_for_process = false,
         .require_approval_for_shell = false,
@@ -245,8 +263,14 @@ inline std::string prepare(const std::filesystem::path& skill_dir,
   if (!std::filesystem::exists(target, error)) {
     return { .error = "目标不存在: " + target.string() };
   }
+  if (endpoint.base_url.empty()) {
+    return { .error = "缺少 API 地址（设置 DOCGEN_BASE_URL 或界面填写）" };
+  }
   if (endpoint.api_key.empty()) {
-    return { .error = "缺少 API key（设置 MIMO_API_KEY 或在界面填写）" };
+    return { .error = "缺少 API key（设置 DOCGEN_API_KEY 或界面填写）" };
+  }
+  if (endpoint.model.empty()) {
+    return { .error = "缺少模型名（设置 DOCGEN_MODEL 或界面填写）" };
   }
   const auto project_dir =
     std::filesystem::is_directory(target, error) ? target : target.parent_path();

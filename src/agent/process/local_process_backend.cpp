@@ -224,9 +224,44 @@ std::optional<std::vector<wchar_t>> environment_block(
   return block;
 }
 
+// 子进程输出经管道传递时，Windows 控制台程序用的是 OEM 代码页（中文系统为 cp936）
+// 而不是 UTF-8。原始字节直接存进 std::string 会让下游 JSON 序列化抛
+// type_error.316 invalid UTF-8 byte，表现为“命令输出里带中文就随机失败”。
+// 整段读完再转码，避免多字节字符被读缓冲切断。
+[[nodiscard]] std::string decode_output(const std::string& raw) {
+#ifdef _WIN32
+  if (raw.empty())
+    return raw;
+  // 已是合法 UTF-8 就原样保留（POSIX 约定，或子进程自己配了 UTF-8）。
+  if (MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, raw.data(), static_cast<int>(raw.size()), nullptr, 0) > 0)
+    return raw;
+  // ponytail: 只按 OEM 代码页试一次，cmd 与 Python 在中文 Windows 上同为 cp936。
+  // 若将来要适配 OEM/ANSI 不一致的语言（如俄语 OEM 866 / ANSI 1251），再回退 ANSI。
+  const UINT codepage = GetOEMCP();
+  const auto wide_size =
+    MultiByteToWideChar(codepage, 0, raw.data(), static_cast<int>(raw.size()), nullptr, 0);
+  if (wide_size <= 0)
+    return raw;
+  std::wstring wide(static_cast<std::size_t>(wide_size), L'\0');
+  MultiByteToWideChar(
+    codepage, 0, raw.data(), static_cast<int>(raw.size()), wide.data(), wide_size);
+  const auto utf8_size =
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, nullptr, 0, nullptr, nullptr);
+  if (utf8_size <= 0)
+    return raw;
+  std::string utf8(static_cast<std::size_t>(utf8_size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, utf8.data(), utf8_size, nullptr, nullptr);
+  return utf8;
+#else
+  return raw;
+#endif
+}
+
 void read_handle(unique_handle owned, std::string& output, std::size_t limit, bool& truncated,
   const std::atomic_bool& stop_io) {
   std::array<char, 8192> buffer {};
+  std::string raw;
   for (;;) {
     DWORD available = 0;
     if (!PeekNamedPipe(owned.get(), nullptr, 0, nullptr, &available, nullptr))
@@ -241,8 +276,9 @@ void read_handle(unique_handle owned, std::string& output, std::size_t limit, bo
     const auto requested = (std::min)(static_cast<DWORD>(buffer.size()), available);
     if (!ReadFile(owned.get(), buffer.data(), requested, &count, nullptr) || count == 0)
       break;
-    append_bounded(output, buffer.data(), count, limit, truncated);
+    append_bounded(raw, buffer.data(), count, limit, truncated);
   }
+  output += decode_output(raw);
 }
 
 void write_handle(unique_handle owned, const std::string& input) {

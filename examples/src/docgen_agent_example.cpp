@@ -44,9 +44,9 @@ int main(int argc, char** argv) {
   }
 
   const docgen::llm_endpoint endpoint {
-    .base_url = env_or("DOCGEN_BASE_URL", docgen::default_base_url),
-    .api_key = wuwe::llm_config::load_env_value("MIMO_API_KEY"),
-    .model = env_or("DOCGEN_MODEL", docgen::default_model),
+    .base_url = env_or("DOCGEN_BASE_URL", ""),
+    .api_key = wuwe::llm_config::load_env_value("DOCGEN_API_KEY"),
+    .model = env_or("DOCGEN_MODEL", ""),
   };
   // 流式块状态：T=思考 M=正文 \0=无（工具行会打断当前块）
   auto block = std::make_shared<char>('\0');
