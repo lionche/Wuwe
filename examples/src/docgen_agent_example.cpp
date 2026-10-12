@@ -1,4 +1,4 @@
-// 代码文档智能体（CLI）：为目标代码生成《需求规格说明》《软件设计说明》双文档。
+// 代码孪生智能体（CLI）：为目标代码生成《需求规格说明》《软件设计说明》双文档。
 // 用法: docgen_agent_example <代码文件或项目目录>
 // 自检: docgen_agent_example --check   （不调用 LLM，验证 skill 加载与工具装配）
 // skill 目录默认内置，可用环境变量 DOCGEN_SKILL_DIR 覆盖。

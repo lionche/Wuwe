@@ -1,4 +1,4 @@
-// 代码文档智能体共用装配：skill 加载激活、文件/进程工具装配、agent runner 组装。
+// 代码孪生智能体共用装配：skill 加载激活、文件/进程工具装配、agent runner 组装。
 // CLI（docgen_agent_example）与 GUI（docgen-gui）共用，逻辑改动只应发生在这里。
 #ifndef DOCGEN_AGENT_HPP
 #define DOCGEN_AGENT_HPP
