@@ -4,13 +4,48 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <filesystem>
 #include <utility>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #include <cpr/cpr.h>
 
 WUWE_NAMESPACE_BEGIN
 
 namespace {
+
+// curl 用 OpenSSL 后端时不读系统证书库；cpr 虽然会设 CURLSSLOPT_NATIVE_CA，但该选项在
+// 部分 libcurl 构建里无效（实测 8.13 + OpenSSL 3.6 仍报 "unable to get local issuer
+// certificate"），所以这里显式给一个 CA 包。查找顺序：
+//   环境变量 DOCGEN_CA_FILE → CURL_CA_BUNDLE → SSL_CERT_FILE → exe 同目录 cacert.pem
+// 注意 libcurl 自己并不读这三个环境变量（读它们的是 curl 命令行工具）。
+std::string default_ca_bundle() {
+  for (const char* name : { "DOCGEN_CA_FILE", "CURL_CA_BUNDLE", "SSL_CERT_FILE" }) {
+    if (const char* value = std::getenv(name); value != nullptr && *value != '\0') {
+      return value;
+    }
+  }
+#if defined(_WIN32)
+  char path[MAX_PATH] = {};
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  if (length > 0 && length < MAX_PATH) {
+    std::string candidate(path, static_cast<std::size_t>(length));
+    const auto slash = candidate.find_last_of("\\/");
+    if (slash != std::string::npos) {
+      candidate.resize(slash + 1);
+      candidate += "cacert.pem";
+      if (GetFileAttributesA(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return candidate;
+      }
+    }
+  }
+#endif
+  return {};
+}
 
 std::string normalize_http_method(std::string method) {
   std::transform(method.begin(), method.end(), method.begin(), [](unsigned char ch) {
@@ -57,7 +92,11 @@ void configure_session(cpr::Session& session, const http_request& request) {
     cpr::ssl::VerifyPeer { request.tls.verify_peer },
     cpr::ssl::VerifyHost { request.tls.verify_host });
   if (!request.tls.ca_file.empty()) {
-    ssl_options.SetOption(cpr::ssl::CaInfo { request.tls.ca_file });
+    ssl_options.SetOption(cpr::ssl::CaInfo { std::filesystem::path { request.tls.ca_file } });
+  }
+  else if (const auto bundle = default_ca_bundle(); !bundle.empty()) {
+    // 没显式指定就退回默认 CA 包，否则 Windows + OpenSSL 下 HTTPS 一律校验失败
+    ssl_options.SetOption(cpr::ssl::CaInfo { std::filesystem::path { bundle } });
   }
   if (!request.tls.ca_directory.empty()) {
     ssl_options.SetOption(cpr::ssl::CaPath { request.tls.ca_directory });
