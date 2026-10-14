@@ -308,7 +308,9 @@ inline std::string prepare(const std::filesystem::path& skill_dir,
   request = detail::skills::apply_skill_activation(std::move(request), parts.activation,
     { .trusted_instructions_as_system_messages = true, .expose_activated_tools = false });
 
-  wuwe::llm_agent_runner runner(*client, parts.tools, 64);
+  // 文档生成包含代码扫描、两份草稿、DOCX 写入和多轮校验；复杂项目 64 轮可能在
+  // 最终复制前耗尽预算，模型随后只能总结“未完成事项”。留足收尾空间。
+  wuwe::llm_agent_runner runner(*client, parts.tools, 128);
   wuwe::llm_agent_run_options options;
   options.stop_token = stop_token;
   if (cb.on_delta) {
@@ -349,6 +351,32 @@ inline std::string prepare(const std::filesystem::path& skill_dir,
     return { .error = response.error_code.message() +
                        (detail.empty() ? std::string {} : ": " + detail),
              .out_dir = out_dir };
+  }
+
+  // 模型返回最终文本不等于交付成功。必须以磁盘上的两份非空 DOCX 为准，避免工具
+  // 预算耗尽或脚本中途失败后，GUI仍显示“完成”并指向一个不存在的目录。
+  const std::filesystem::path required_docs[] = {
+    std::filesystem::path(u8"需求规格说明.docx"),
+    std::filesystem::path(u8"软件设计说明.docx"),
+  };
+  for (const auto& name : required_docs) {
+    const auto document = out_dir / name;
+    error.clear();
+    if (!std::filesystem::is_regular_file(document, error) || error) {
+      return {
+        .error = "生成流程已结束，但没有产出两份有效 DOCX（需求规格说明.docx、"
+                 "软件设计说明.docx）。请查看上方工具日志定位失败步骤；临时工作目录会保留以便排查。",
+        .out_dir = out_dir,
+      };
+    }
+    error.clear();
+    if (std::filesystem::file_size(document, error) == 0 || error) {
+      return {
+        .error = "生成流程已结束，但产出的 DOCX 为空或无法读取。请查看上方工具日志；"
+                 "临时工作目录会保留以便排查。",
+        .out_dir = out_dir,
+      };
+    }
   }
   return { .out_dir = out_dir };
 }
